@@ -1,0 +1,296 @@
+     1                                  ;=============================================================================== 
+     2                                  SECTION header vstart=0                     ;定义用户程序头部段 
+     3 00000000 [00000000]                  program_length  dd program_end          ;程序总长度[0x00]
+     4                                      
+     5                                      ;用户程序入口点
+     6 00000004 [3600]                      code_entry      dw start                ;偏移地址[0x04]
+     7 00000006 [00000000]                                  dd section.code.start   ;段地址[0x06] 
+     8                                      
+     9 0000000A 0300                        realloc_tbl_len dw (header_end-realloc_begin)/4
+    10                                                                              ;段重定位表项个数[0x0a]
+    11                                      
+    12                                      realloc_begin:
+    13                                      ;段重定位表           
+    14 0000000C [00000000]                  code_segment    dd section.code.start   
+    15 00000010 [00000000]                  data_segment    dd section.data.start  
+    16 00000014 [00000000]                  stack_segment   dd section.stack.start 
+    17                                      
+    18                                  header_end:                
+    19                                  
+    20                                  ;===============================================================================
+    21                                  SECTION code align=16 vstart=0         ;定义代码段（16字节对齐）
+    22                                  put_string:                            ;显示字符串（0结尾） 
+    23                                                                         ;输入：DS:BX=串地址
+    24 00000000 50                            push ax
+    25 00000001 53                            push bx
+    26 00000002 56                            push si
+    27                                        
+    28 00000003 B40E                          mov ah,0x0e                      ;INT 0x10第0x0e号功能 
+    29 00000005 89DE                          mov si,bx                        ;字符串起始偏移地址 
+    30 00000007 B307                          mov bl,0x07                      ;显示属性 
+    31                                        
+    32                                   .gchr:      
+    33 00000009 8A04                          mov al,[si]                      ;逐个取要显示的字符 
+    34 0000000B 08C0                          or al,al                         ;如果AL内容为零，则 
+    35 0000000D 7406                          jz .rett                         ;跳转到过程返回指令 
+    36 0000000F CD10                          int 0x10                         ;BIOS字符显示功能调用 
+    37 00000011 46                            inc si                           ;下一个字符 
+    38 00000012 E9F4FF                        jmp .gchr
+    39                                        
+    40                                   .rett:
+    41 00000015 5E                            pop si
+    42 00000016 5B                            pop bx
+    43 00000017 58                            pop ax
+    44                                              
+    45 00000018 C3                            ret
+    46                                  
+    47                                  ;------------------------------------------------------------------------------- 
+    48                                  write_dsp:
+    49 00000019 52                            push dx
+    50 0000001A 50                            push ax
+    51                                        
+    52 0000001B BA2C02                        mov dx,022ch
+    53                                   .@22c:
+    54 0000001E EC                            in al,dx                        
+    55 0000001F 2480                          and al,1000_0000b	               ;监视22c端口的第7位，直到它变为0
+    56 00000021 75FB                          jnz .@22c
+    57                                  
+    58 00000023 58                            pop ax
+    59 00000024 EE                            out dx,al
+    60 00000025 5A                            pop dx
+    61                                        
+    62 00000026 C3                            ret
+    63                                  
+    64                                  ;-------------------------------------------------------------------------------
+    65                                  read_dsp:
+    66 00000027 52                            push dx
+    67                                        
+    68 00000028 BA2E02                        mov dx,22eh
+    69                                   .@22e:
+    70 0000002B EC                            in al,dx                          
+    71 0000002C 2480                          and al,1000_0000b                ;监视22e端口的位7，直到它变成1
+    72 0000002E 74FB                          jz .@22e
+    73 00000030 BA2A02                        mov dx,22ah
+    74 00000033 EC                            in al,dx                         ;此时可以从22a端口读取数据
+    75                                        
+    76 00000034 5A                            pop dx
+    77                                        
+    78 00000035 C3                            ret
+    79                                  
+    80                                  ;-------------------------------------------------------------------------------
+    81                                  start:
+    82 00000036 A1[1400]                      mov ax,[stack_segment]
+    83 00000039 8ED0                          mov ss,ax                        ;修改SS时，处理器将在执行下一指
+    84 0000003B BC[0001]                      mov sp,ss_pointer                ;令前禁止中断
+    85                                        
+    86 0000003E A1[1000]                      mov ax,[data_segment]
+    87 00000041 8ED8                          mov ds,ax
+    88                                  
+    89 00000043 BB[1CE5]                      mov bx,init_msg
+    90 00000046 E8B7FF                        call put_string
+    91                                                 
+    92                                        ;以下复位DSP芯片
+    93 00000049 BA2602                        mov dx,0x226 
+    94 0000004C B001                          mov al,1                         ;第一步，先写“1”到复位端口 
+    95 0000004E EE                            out dx,al
+    96                                      
+    97 0000004F 31C0                          xor ax,ax
+    98                                    .@1:
+    99 00000051 48                            dec ax
+   100 00000052 75FD                          jnz .@1                          ;一个硬件要求的延时(至少3ms) 
+   101                                      
+   102 00000054 EE                            out dx,al                        ;第二步，写“0”到复位端口 
+   103                                  
+   104 00000055 E8CFFF                        call read_dsp
+   105 00000058 3CAA                          cmp al,0xaa                      ;状态值0xaa表示初始化完成 
+   106 0000005A 7409                          jz .@4
+   107                                      
+   108 0000005C BB[9BE5]                      mov bx,err_msg                   ;显示出错信息 
+   109 0000005F E89EFF                        call put_string
+   110 00000062 E9AA00                        jmp .idle                        ;直接停机 
+   111                                        
+   112                                    .@4:
+   113 00000065 BB[6CE5]                      mov bx,done_msg
+   114 00000068 E895FF                        call put_string
+   115                                        
+   116                                        ;以下安装中断处理过程
+   117 0000006B BB[3FE5]                      mov bx,intr_msg
+   118 0000006E E88FFF                        call put_string
+   119                                        
+   120 00000071 B00D                          mov al,0x0d                      ;IR5引脚的中断号 
+   121 00000073 B304                          mov bl,4                         ;每个中断向量占4个字节。本段等效于： 
+   122 00000075 F6E3                          mul bl                           ;mov bx,0x0d
+   123 00000077 89C3                          mov bx,ax                        ;shl bx,2
+   124                                        
+   125 00000079 FA                            cli                              ;禁止在修改IVT期间发生中断 
+   126                                        
+   127 0000007A 06                            push es                          ;临时使用ES 
+   128 0000007B 31C0                          xor ax,ax
+   129 0000007D 8EC0                          mov es,ax                        ;指向内存最低处的中断向量表 
+   130 0000007F 26C707[1301]                  mov word [es:bx],dsp_interrupt
+   131                                                                         ;偏移地址 
+   132 00000084 43                            inc bx
+   133 00000085 43                            inc bx
+   134 00000086 268C0F                        mov word [es:bx],cs              ;当前代码段 
+   135 00000089 07                            pop es
+   136                                        
+   137 0000008A FB                            sti
+   138                                  
+   139                                        ;允许IRQ5
+   140 0000008B E421                          in al,0x21                       ;8259主片的IMR 
+   141 0000008D 24DF                          and al,1101_1111B                ;开放IR5 
+   142 0000008F E621                          out 0x21,al
+   143                                        
+   144 00000091 BB[6CE5]                      mov bx,done_msg
+   145 00000094 E869FF                        call put_string
+   146                                  
+   147 00000097 BB[5EE5]                      mov bx,dma_msg
+   148 0000009A E863FF                        call put_string
+   149                                                                         
+   150                                        ;对DMA控制器编程，设置其工作模式、缓冲区地址和传输长度
+   151 0000009D BA0A00                        mov dx,0x0a	               ;DMAC1的屏蔽寄存器
+   152 000000A0 B005                          mov al,00000_1_01B	       ;关闭主DMAC的1号通道 
+   153 000000A2 EE                            out dx,al                      
+   154                                  		
+   155 000000A3 8CD8                          mov ax,ds                        ;计算缓冲区物理地址
+   156 000000A5 BB1000                        mov bx,16
+   157 000000A8 F7E3                          mul bx
+   158 000000AA 05[0000]                      add ax,voice_data
+   159 000000AD 81D20000                      adc dx,0
+   160 000000B1 89D3                          mov bx,dx                        ;bx:ax=缓冲区20位地址 
+   161                                  
+   162 000000B3 30C0                          xor al,al
+   163 000000B5 E60C                          out 0x0c,al                      ;DMAC1高低触发器清零
+   164                                  
+   165 000000B7 BA0200                        mov dx,0x02                      ;写通道1基址与当前地址寄存器
+   166 000000BA EE                            out dx,al                        ;低8位DMA地址 
+   167 000000BB 88E0                          mov al,ah
+   168 000000BD EE                            out dx,al                        ;高8位DMA地址 
+   169                                  
+   170 000000BE BA8300                        mov dx,0x83                      ;写DMA通道 1 的页面寄存器
+   171 000000C1 88D8                          mov al,bl
+   172 000000C3 EE                            out dx,al
+   173                                  
+   174 000000C4 BA0300                        mov dx,0x03                      ;写通道1的基字计数与当前字计数器
+   175 000000C7 B81CE5                        mov ax,init_msg-voice_data       ;数据块（当缓冲区用）的大小 
+   176 000000CA 48                            dec ax                           ;DMA要求实际大小减一
+   177 000000CB EE                            out dx,al                        ;缓冲区长度低8位
+   178 000000CC 88E0                          mov al,ah
+   179 000000CE EE                            out dx,al                        ;缓冲区长度高8位
+   180                                         
+   181 000000CF B059                          mov al,0101_1001b                ;设置DMAC1通道1工作方式：单字节传送/
+   182 000000D1 E60B                          out 0x0b,al                      ;地址递增/自动预置/读传送/通道1
+   183                                  
+   184 000000D3 BA0A00                        mov dx,0x0a                      ;DMAC1屏蔽寄存器
+   185 000000D6 B001                          mov al,1                         ;允许通道1接受请求
+   186 000000D8 EE                            out dx,al
+   187                                  
+   188 000000D9 B040                          mov al,0x40                      ;设置DSP采样率（播放）
+   189 000000DB E83BFF                        call write_dsp
+   190 000000DE B80083                        mov ax,65536-(256000000/(1*8000))
+   191 000000E1 86E0                          xchg ah,al                       ;只使用结果的高8位 
+   192 000000E3 E833FF                        call write_dsp
+   193                                  
+   194                                        ;显示信息
+   195 000000E6 BB[6CE5]                      mov bx,done_msg
+   196 000000E9 E814FF                        call put_string
+   197                                  
+   198                                        ;编程设置DSP的DMA传输模式和数据长度，以启动音频播放
+   199 000000EC B048                          mov al,0x48
+   200 000000EE E828FF                        call write_dsp
+   201 000000F1 B81CE5                        mov ax,init_msg-voice_data       ;数据块（当缓冲区用）的大小
+   202 000000F4 D1E8                          shr ax,1                         ;长度设为DMA的一半
+   203 000000F6 48                            dec ax 
+   204 000000F7 E81FFF                        call write_dsp                   ;写低字节 
+   205 000000FA 86E0                          xchg ah,al                      
+   206 000000FC E81AFF                        call write_dsp                   ;写高字节
+   207                                     
+   208                                        ;打开喇叭输出
+   209 000000FF B0D1                          mov al,0xd1
+   210 00000101 E815FF                        call write_dsp
+   211                                  
+   212                                        ;启动DSP的传输的播放
+   213 00000104 B01C                          mov al,0x1c
+   214 00000106 E810FF                        call write_dsp
+   215                                  
+   216 00000109 BB[74E5]                      mov bx,play_msg
+   217 0000010C E8F1FE                        call put_string
+   218                                        
+   219                                    .idle:
+   220 0000010F F4                            hlt
+   221 00000110 E9FCFF                        jmp .idle
+   222                                         
+   223                                  ;-------------------------------------------------------------------------------  
+   224                                  dsp_interrupt:                         ;中断处理过程
+   225 00000113 50                            push ax
+   226 00000114 53                            push bx
+   227 00000115 52                            push dx
+   228                                        
+   229                                        ;退出自动初始化模式
+   230 00000116 B0DA                          mov al,0xda
+   231 00000118 E8FEFE                        call write_dsp
+   232                                        
+   233                                        ;关闭扬声器
+   234 0000011B B0D3                          mov al,0xd3
+   235 0000011D E8F9FE                        call write_dsp
+   236                                         
+   237 00000120 BB[6CE5]                      mov bx,done_msg
+   238 00000123 E8DAFE                        call put_string
+   239                                        
+   240 00000126 BB[8CE5]                      mov bx,okay_msg
+   241 00000129 E8D4FE                        call put_string
+   242                                  
+   243 0000012C BA2F02                        mov dx,0x22f                     ;DSP中断应答
+   244 0000012F EC                            in al,dx
+   245                                  
+   246                                        ;发送EOI命令到中断控制器(主片)
+   247 00000130 B020                          mov al,0x20                      ;中断结束命令EOI
+   248 00000132 E620                          out 0x20,al                      ;发给主片 
+   249                                  
+   250 00000134 5A                            pop dx
+   251 00000135 5B                            pop bx
+   252 00000136 58                            pop ax
+   253                                        
+   254 00000137 CF                            iret
+   255                                        
+   256                                  ;-------------------------------------------------------------------------------
+   257                                  SECTION data align=16 vstart=0
+   258                                  
+   259 00000000 <incbin>                  voice_data   incbin "baby.wav",44
+   260                                      
+   261 0000E51C 496E697469616C697A-         init_msg       db 'Initializing sound blaster card...',0
+   262 0000E525 696E6720736F756E64-
+   263 0000E52E 20626C617374657220-
+   264 0000E537 636172642E2E2E00   
+   265                                      
+   266 0000E53F 496E7374616C6C696E-         intr_msg       db 'Installing interrupt vector...',0
+   267 0000E548 6720696E7465727275-
+   268 0000E551 707420766563746F72-
+   269 0000E55A 2E2E2E00           
+   270                                                     
+   271 0000E55E 536574757020444D41-          dma_msg       db 'Setup DMA ...',0
+   272 0000E567 202E2E2E00         
+   273                                                     
+   274 0000E56C 446F6E652E0D0A00            done_msg       db 'Done.',0x0d,0x0a,0
+   275                                                     
+   276 0000E574 566F69636520697320-         play_msg       db 'Voice is playing now...',0
+   277 0000E57D 706C6179696E67206E-
+   278 0000E586 6F772E2E2E00       
+   279                                      
+   280 0000E58C 46696E69736865642C-         okay_msg       db 'Finished,stop.',0
+   281 0000E595 73746F702E00       
+   282                                      
+   283 0000E59B 536F756E6420636172-          err_msg       db 'Sound card init failed.',0
+   284 0000E5A4 6420696E6974206661-
+   285 0000E5AD 696C65642E00       
+   286                                                     
+   287                                  ;===============================================================================
+   288                                  SECTION stack align=16 vstart=0
+   289                                             
+   290 00000000 <res 00000100>                           resb 256
+   291          ******************       warning: uninitialized space declared in stack section: zeroing
+   292                                  ss_pointer:
+   293                                  
+   294                                  ;===============================================================================  
+   295                                  SECTION program_trail
+   296                                  program_end:

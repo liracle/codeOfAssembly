@@ -1,0 +1,83 @@
+     1                                           ;代码清单9-2
+     2                                           ;文件名：c09_2.asm
+     3                                           ;文件说明：用于演示BIOS中断的用户程序 
+     4                                           ;创建日期：2012-3-28 20:35
+     5                                           
+     6                                  ;===============================================================================
+     7                                  SECTION header vstart=0                     ;定义用户程序头部段 
+     8 00000000 [00000000]                  program_length  dd program_end          ;程序总长度[0x00]
+     9                                      
+    10                                      ;用户程序入口点
+    11 00000004 [0000]                      code_entry      dw start                ;偏移地址[0x04]
+    12 00000006 [00000000]                                  dd section.code.start   ;段地址[0x06] 
+    13                                      
+    14 0000000A 0300                        realloc_tbl_len dw (header_end-realloc_begin)/4
+    15                                                                              ;段重定位表项个数[0x0a]
+    16                                      
+    17                                      realloc_begin:
+    18                                      ;段重定位表           
+    19 0000000C [00000000]                  code_segment    dd section.code.start   ;[0x0c]
+    20 00000010 [00000000]                  data_segment    dd section.data.start   ;[0x14]
+    21 00000014 [00000000]                  stack_segment   dd section.stack.start  ;[0x1c]
+    22                                      
+    23                                  header_end:                
+    24                                      
+    25                                  ;===============================================================================
+    26                                  SECTION code align=16 vstart=0           ;定义代码段（16字节对齐） 
+    27                                  start:
+    28 00000000 A1[1400]                      mov ax,[stack_segment]
+    29 00000003 8ED0                          mov ss,ax
+    30 00000005 BC[0001]                      mov sp,ss_pointer
+    31 00000008 A1[1000]                      mov ax,[data_segment]
+    32 0000000B 8ED8                          mov ds,ax
+    33                                        
+    34 0000000D B97700                        mov cx,msg_end-message
+    35 00000010 BB[0000]                      mov bx,message
+    36                                        
+    37                                   .putc:
+    38 00000013 B40E                          mov ah,0x0e
+    39 00000015 8A07                          mov al,[bx]
+    40 00000017 CD10                          int 0x10
+    41 00000019 43                            inc bx
+    42 0000001A E2F7                          loop .putc
+    43                                  
+    44                                   .reps:
+    45 0000001C B400                          mov ah,0x00
+    46 0000001E CD16                          int 0x16
+    47                                        
+    48 00000020 B40E                          mov ah,0x0e
+    49 00000022 B307                          mov bl,0x07
+    50 00000024 CD10                          int 0x10
+    51                                  
+    52 00000026 E9F3FF                        jmp .reps
+    53                                  
+    54                                  ;===============================================================================
+    55                                  SECTION data align=16 vstart=0
+    56                                  
+    57 00000000 48656C6C6F2C206672-         message       db 'Hello, friend!',0x0d,0x0a
+    58 00000009 69656E64210D0A     
+    59 00000010 546869732073696D70-                       db 'This simple procedure used to demonstrate '
+    60 00000019 6C652070726F636564-
+    61 00000022 757265207573656420-
+    62 0000002B 746F2064656D6F6E73-
+    63 00000034 747261746520       
+    64 0000003A 7468652042494F5320-                       db 'the BIOS interrupt.',0x0d,0x0a
+    65 00000043 696E74657272757074-
+    66 0000004C 2E0D0A             
+    67 0000004F 506C65617365207072-                       db 'Please press the keys on the keyboard ->'
+    68 00000058 65737320746865206B-
+    69 00000061 657973206F6E207468-
+    70 0000006A 65206B6579626F6172-
+    71 00000073 64202D3E           
+    72                                      msg_end:
+    73                                                     
+    74                                  ;===============================================================================
+    75                                  SECTION stack align=16 vstart=0
+    76                                             
+    77 00000000 <res 00000100>                           resb 256
+    78          ******************       warning: uninitialized space declared in stack section: zeroing
+    79                                  ss_pointer:
+    80                                   
+    81                                  ;===============================================================================
+    82                                  SECTION program_trail
+    83                                  program_end:
